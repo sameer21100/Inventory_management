@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>LAN Bulletin Board</title>
+  <script src="https://cdn.jsdelivr.net/npm/alpinejs" defer></script>
+  <script src="https://cdn.socket.io/4.0.0/socket.io.min.js"></script>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <div x-data="bulletinBoard()">
+    <h1>LAN Bulletin Board</h1>
+    <form @submit.prevent="submitPost">
+      <input x-model="title" placeholder="Title" required>
+      <input x-model="category" placeholder="Category">
+      <textarea x-model="content" placeholder="Content" required></textarea>
+      <button type="submit">Post</button>
+    </form>
+
+    <div>
+      <template x-for="post in posts" :key="post.id">
+        <div class="post">
+          <h3 x-text="post.title"></h3>
+          <p x-text="post.content"></p>
+          <small x-text="post.category"></small>
+        </div>
+      </template>
+    </div>
+  </div>
+  <script src="/static/app.js"></script>
+</body>
+</html>
