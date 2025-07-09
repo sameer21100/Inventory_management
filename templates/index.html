@@ -2,6 +2,7 @@
 <html lang="en">
 
 <head>
+  <script src="https://cdn.socket.io/4.4.1/socket.io.min.js"></script>
   <title>LAN Bulletin Board</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
 </head>
@@ -45,8 +46,16 @@
   }
 </style>
 
-<body class="container mt-5">
-  <div class="container mt-5">
+<body class="d-flex justify-content-center">
+  <div class="container mt-5" style="max-width: 900px;">
+    <div class="mb-3 text-end">
+      {% if user %}
+        <span class="me-2">Logged in as <strong>{{ user }}</strong></span>
+        <a href="/logout" class="btn btn-sm btn-outline-danger">Logout</a>
+      {% else %}
+        <a href="/login" class="btn btn-sm btn-outline-primary">Login</a>
+      {% endif %}
+    </div>
     <h2 class="mb-4">
 
       {% if tag %}
@@ -55,26 +64,63 @@
       </div>
       {% endif %}
 
-      <span class="me-2">📌</span>LAN Bulletin Board
+      <span class="me-2"></span>LAN Bulletin Board
     </h2>
-    <!-- Tag Search with Suggestions -->
-    <div class="mb-4 position-relative">
-      <input type="text" id="tag-search" class="form-control" placeholder="Search by Category...">
-      <div id="suggestions" class="list-group position-absolute w-100 z-3" style="top:100%;"></div>
+
+      <!-- Tag Search and Date Filter Toggle -->
+    <div class="row mb-4">
+      <div class="col-md-6 position-relative">
+        <input type="text" id="tag-search" class="form-control" placeholder="Search by Category...">
+        <div id="suggestions" class="list-group position-absolute w-100 z-3" style="top:100%; max-height: 200px; overflow-y: auto;"></div>
+      </div>
+      <div class="col-md-3">
+        <button class="btn btn-outline-secondary w-100" type="button" onclick="toggleDateFilter()">Filter by Date</button>
+      </div>
     </div>
+
+       <!-- Collapsible Date Filter Form -->
+    <div id="date-filter-form" style="display: none;">
+      <form method="GET" action="/range" class="row g-3 mb-4">
+        <!-- <div class="col-md-3">
+          <input type="text" class="form-control" name="tag" placeholder="Tag (optional)">
+        </div> -->
+        <div class="col-md-3">
+          <input type="date" class="form-control" name="start" placeholder="Start Date">
+        </div>
+        <div class="col-md-3">
+          <input type="date" class="form-control" name="end" placeholder="End Date">
+        </div>
+        <div class="col-md-3">
+          <button type="submit" class="btn btn-dark w-100">Filter</button>
+        </div>
+      </form>
+    </div>
+
 
     <!-- Post Form -->
     <form method="POST" action="/" enctype="multipart/form-data" class="mb-4">
-      <div class="mb-3">
-        <input type="text" class="form-control" name="title" placeholder="Title" required>
+      <div class="row">
+        <div class="mb-3 col-md-6">
+          <input type="text" class="form-control" name="title" placeholder="Title" required>
+        </div>
+        <div class="mb-3 col-md-4">
+          <input type="text" class="form-control" name="category" placeholder="Category" required>
+        </div>
       </div>
-      <div class="mb-3">
-        <input type="text" class="form-control" name="category" placeholder="Category" required>
+      <div class="row">
+        <div class="mb-3 col-md-6">
+          <textarea class="form-control" name="content" placeholder="Content" rows="4" required></textarea>
+        </div>
+        <div class="col-md-3">
+          <input type="file" name="image" class="form-control mb-3" accept="image/*">
+          <label for="priority" class="form-label">Priority</label>
+          <select class="form-select" name="priority" id="priority" required>
+            <option value="1" selected>Lowest</option>
+            <option value="2">Medium</option>
+            <option value="3">Highest</option>
+          </select>
+        </div>
       </div>
-      <div class="mb-3">
-        <textarea class="form-control" name="content" placeholder="Content" rows="4" required></textarea>
-      </div>
-      <input type="file" name="image" class="form-control mb-3" accept="image/*">
       <button type="submit" class="btn btn-primary">Post</button>
     </form>
 
@@ -92,11 +138,29 @@
         <h3>{{ post.title }}</h3>
         <p><strong>Category:</strong> {{ post.category }}</p>
         <p>{{ post.content }}</p>
+        <!-- the Priority of the post
+          -->
+        <!-- <p>
+          <strong>Priority:</strong>
+          {% if post.priority == 3 %}
+            <span class="badge bg-danger">Highest</span>
+          {% elif post.priority == 2 %}
+            <span class="badge bg-warning text-dark">Medium</span>
+          {% else %}
+            <span class="badge bg-secondary">Lowest</span>
+          {% endif %}
+        </p> -->
+
         {% if post.image %}
         <img src="{{ url_for('static', filename='uploads/' ~ post.image) }}" style="width: 150px; cursor: pointer;"
           onclick="this.style.width=this.style.width==='150px'?'100%':'150px';" />
         {% endif %}
         <small><em>Posted on: {{ post.created_at }}</em></small>
+        {% if user %}
+          <form method="POST" action="/delete/{{ post.id }}">
+            <button type="submit" class="btn btn-sm btn-danger mt-2">Delete</button>
+          </form>
+        {% endif %}
         <hr>
       </div>
       {% endfor %}
@@ -147,6 +211,25 @@
       if (!suggestionBox.contains(e.target) && e.target !== input) {
         suggestionBox.innerHTML = "";
       }
+    });
+
+    
+    function toggleDateFilter() {
+      const form = document.getElementById("date-filter-form");
+      form.style.display = form.style.display === "none" ? "block" : "none";
+    }
+  
+  </script>
+  <script>
+    const socket = io();
+
+    socket.on('connect', () => {
+      console.log('Connected to Socket.IO server');
+    });
+
+    socket.on('new_post', (post) => {
+      alert(`🆕 New Post: ${post.title}`);
+      // Optionally auto-refresh or append to DOM
     });
   </script>
 </body>

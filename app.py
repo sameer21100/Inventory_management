@@ -1,8 +1,9 @@
-from flask import Flask, render_template, request, jsonify,redirect
+from flask import Flask, render_template, request, jsonify, redirect, session
 from flask_socketio import SocketIO, emit
 import sqlite3
 import os
 from werkzeug.utils import secure_filename
+import secrets
 
 
 #Trie Implementation
@@ -41,6 +42,7 @@ class TagTrie:
         return results
     
 app = Flask(__name__)
+app.secret_key = secrets.token_hex(16)
 app.config['UPLOAD_FOLDER'] = 'static/uploads'
 
 socketio = SocketIO(app, cors_allowed_origins='*')
@@ -59,6 +61,7 @@ def init_db():
         content TEXT NOT NULL,
         category TEXT,
         image TEXT,
+        priority INTEGER DEFAULT 1,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )''')
     conn.commit()
@@ -83,6 +86,7 @@ def index():
             content = request.form['content']
             image = request.files.get('image')
             image_filename = None
+            priority = int(request.form.get('priority', 1))
 
             if image and image.filename != '':
                 filename = secure_filename(image.filename)
@@ -93,35 +97,70 @@ def index():
             conn = sqlite3.connect(DB_PATH)
             cursor = conn.cursor()
             cursor.execute('''
-                INSERT INTO posts (title, content, category, image)
-                VALUES (?, ?, ?, ?)
-            ''', (title, content, category, image_filename))
+                INSERT INTO posts (title, content, category, image, priority)
+                VALUES (?, ?, ?, ?, ?)
+            ''', (title, content, category, image_filename, priority))
             conn.commit()
             conn.close()
 
         return redirect('/')
 
     # GET method
+
+
     posts_data = []
     if show:
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
         cursor.execute('''
-            SELECT title, content, category, image, created_at 
-            FROM posts ORDER BY created_at DESC
+            SELECT id, title, content, category, image, priority, created_at 
+            FROM posts 
+            WHERE DATE(created_at) >= DATE('now', '-2 days')
+            ORDER BY priority DESC, created_at DESC
         ''')
         rows = cursor.fetchall()
         conn.close()
 
         posts_data = [{
-            'title': row[0],
-            'content': row[1],
-            'category': row[2],
-            'image': row[3],
-            'created_at': row[4]
+            'id': row[0],
+            'title': row[1],
+            'content': row[2],
+            'category': row[3],
+            'image': row[4],
+            'priority': row[5],
+            'created_at': row[6]
         } for row in rows]
 
-    return render_template('index.html', posts=posts_data, show=show, tag=None)
+    return render_template('index.html', posts=posts_data, show=show, tag=None, user=session.get('user'))
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    error = None  # ✅ initialize
+
+    if request.method == 'POST':
+        username = request.form['username']
+        password = request.form['password']
+
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute('SELECT * FROM users WHERE username=? AND password=?', (username, password))
+        user = cursor.fetchone()
+        conn.close()
+
+        if user:
+            session['user'] = username
+            return redirect('/')
+        else:
+            error = 'Invalid username or password' 
+
+    return render_template('login.html', error=error)  
+
+
+# --- Logout route ---
+@app.route('/logout')
+def logout():
+    session.pop('user', None)
+    return redirect('/')
 
 
 @app.route('/search')
@@ -149,7 +188,65 @@ def search_by_tag():
             'created_at': row[4]
         } for row in rows]
 
-    return render_template('index.html', posts=posts_data, show=True, tag=tag)
+    return render_template('index.html', posts=posts_data, show=True, tag=tag, user=session.get('user'))
+
+
+# --- /range route for tag + date range filtering ---
+@app.route('/range')
+def posts_by_date_range():
+    start = request.args.get('start')
+    end = request.args.get('end')
+    tag = request.args.get('tag', '').strip()
+    posts_data = []
+
+    query = '''
+        SELECT title, content, category, image, created_at 
+        FROM posts 
+        WHERE 1 = 1
+    '''
+    params = []
+
+    if tag:
+        query += ' AND category LIKE ?'
+        params.append(f'%{tag}%')
+
+    if start and end:
+        query += ' AND DATE(created_at) BETWEEN DATE(?) AND DATE(?)'
+        params.extend([start, end])
+        tag = f"{tag} (From {start} to {end})" if tag else f"From {start} to {end}"
+
+    query += ' ORDER BY created_at DESC'
+
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute(query, params)
+    rows = cursor.fetchall()
+    conn.close()
+
+    posts_data = [{
+        'title': row[0],
+        'content': row[1],
+        'category': row[2],
+        'image': row[3],
+        'created_at': row[4]
+    } for row in rows]
+
+    return render_template('index.html', posts=posts_data, show=True, tag=tag, user=session.get('user'))
+
+
+@app.route('/delete/<int:post_id>', methods=['POST'])
+def delete_post(post_id):
+    if 'user' not in session:
+        return redirect('/login')
+
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('DELETE FROM posts WHERE id = ?', (post_id,))
+    conn.commit()
+    conn.close()
+
+    return redirect('/')
+
 
 @app.route('/posts', methods=['GET'])
 def get_posts():
@@ -185,9 +282,10 @@ def suggest():
 @app.route('/posts', methods=['POST'])
 def add_post():
     data = request.get_json()
+    priority = int(data.get('priority', 1))
     conn = sqlite3.connect(DB_PATH)
-    conn.execute("INSERT INTO posts (title, content, category) VALUES (?, ?, ?)",
-                 (data['title'], data['content'], data['category']))
+    conn.execute("INSERT INTO posts (title, content, category, priority) VALUES (?, ?, ?, ?)",
+                 (data['title'], data['content'], data['category'], priority))
     conn.commit()
     conn.close()
     socketio.emit('new_post', data, broadcast=True)
